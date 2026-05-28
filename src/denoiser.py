@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.layers import Input, Conv1D, MaxPool1D, UpSampling1D, Concatenate
 from tensorflow.keras.models import Model
-from scipy.signal import find_peaks
+import tensorflow as tf
 import warnings
 import os
 warnings.filterwarnings('ignore')
@@ -16,18 +16,21 @@ warnings.filterwarnings('ignore')
 plt.rcParams['figure.figsize'] = (12, 5)
 
 print("Loading data from methane_dataset.npz...")
-# loaded_data = np.load('methane_dataset.npz')
-data = np.load('[path/to/]data/methane_dataset_full.npz') # EDIT FILE PATH HERE
+data = np.load('methane_dataset.npz') # Changed to updated dataset
 
-Y_full = loaded_data['clean']
-X_full = loaded_data['noisy']
-params_array = loaded_data['params']
-wavenumber_grid = np.arange(5900, 6200, 0.01) # Define this again, or save it in the .npz too!
+Y_full = data['clean']  
+X_full = data['noisy']
+params_array = data['params']
+
+N_POINTS = X_full.shape[1]  # 2048
+WINDOW_WIDTH = 20.48
+wavenumber_grid = np.linspace(-WINDOW_WIDTH/2, WINDOW_WIDTH/2, N_POINTS)
+
 print(f"Successfully loaded 'noisy' array with shape: {Y_full.shape}")
 print(f"Loaded data shapes: X={X_full.shape}, Y={Y_full.shape}")
 
 # Plot one example
-sample_index = 2
+sample_index = 0
 plt.figure(figsize=(12, 6))
 plt.plot(wavenumber_grid, Y_full[sample_index], label='Clean Spectrum')
 plt.plot(wavenumber_grid, X_full[sample_index], label='Noisy Spectrum', alpha=0.6)
@@ -47,19 +50,26 @@ X_data = np.expand_dims(X_full, axis=-1)
 Y_data = np.expand_dims(Y_full, axis=-1)
 print(f"Reshaped data shapes: X={X_data.shape}, Y={Y_data.shape}")
 
-# Split train and validation sets
 X_train, X_val, Y_train, Y_val = train_test_split(
     X_data, 
     Y_data, 
     test_size=0.2, 
-    random_state=42 # For reproducibility
+    random_state=42
 )
+
+# Force concrete numpy arrays so Keras always sees a defined shape
+X_train = np.array(X_train, dtype=np.float32)
+X_val   = np.array(X_val,   dtype=np.float32)
+Y_train = np.array(Y_train, dtype=np.float32)
+Y_val   = np.array(Y_val,   dtype=np.float32)
+
+print(f"Training shapes:   X={X_train.shape}, Y={Y_train.shape}")
 
 print(f"Training shapes:   X={X_train.shape}, Y={Y_train.shape}")
 print(f"Validation shapes: X={X_val.shape}, Y={Y_val.shape}")
 input_shape = (X_train.shape[1], 1)
 
-def build_unet(shape): # Understand this better (layers are recommended by Gemini)
+def build_unet(shape): # Denoising U-net autoencoder architecture
     """Builds a 1D U-Net model."""
     inputs = Input(shape=shape)
 
@@ -95,7 +105,7 @@ def build_unet(shape): # Understand this better (layers are recommended by Gemin
     model = Model(inputs=[inputs], outputs=[outputs])
     return model
 
-# Build and summarize the model
+# Build model FIRST
 denoiser_model = build_unet(input_shape)
 denoiser_model.summary()
 
@@ -107,8 +117,8 @@ print("Starting model training...")
 history = denoiser_model.fit(
     X_train, Y_train,
     validation_data=(X_val, Y_val),
-    epochs=50,
-    batch_size=4,
+    epochs=150, # Change this *****
+    batch_size=16,
     verbose=1
 )
 print("...Training complete.")
@@ -128,30 +138,3 @@ denoiser_model.save('methane_denoiser.h5')
 print("Denoiser saved as methane_denoiser.h5")
 print("Current working directory:", os.getcwd())
 print("Full path to model:", os.path.abspath('methane_denoiser.h5'))
-
-# Let's use the first validation sample as a test spectrum for validation set
-X_test_sample = X_val[0]
-Y_test_sample = Y_val[0]
-
-# We must add a "batch" dimension for predict()
-X_test_sample_batch = np.expand_dims(X_test_sample, axis=0)
-
-# Predict (de-noise)
-Y_pred_sample_batch = denoiser_model.predict(X_test_sample_batch)
-
-# Remove extra dimensions for plotting
-Y_pred_sample = Y_pred_sample_batch.squeeze()
-X_test_sample_plot = X_test_sample.squeeze()
-Y_test_sample_plot = Y_test_sample.squeeze()
-
-# Plot Results
-plt.figure(figsize=(12, 6))
-plt.plot(wavenumber_grid, X_test_sample_plot, label='Noisy Input (X)', color='orange', alpha=0.6)
-plt.plot(wavenumber_grid, Y_test_sample_plot, label='Ground Truth (Y)', color='blue', linewidth=2)
-plt.plot(wavenumber_grid, Y_pred_sample, label='Model Prediction (Y_pred)', color='red', linestyle='--', linewidth=2)
-plt.title('Denoising Results')
-plt.xlabel('Wavenumber (cm⁻¹)')
-plt.ylabel('Absorption')
-plt.legend()
-plt.grid(True)
-plt.show()
