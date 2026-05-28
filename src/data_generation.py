@@ -256,7 +256,7 @@ params_array = np.array(parameters)
 peak_offsets_array = np.array(peak_targets, dtype=object)
 
 np.savez_compressed(
-    '4_13_methane_dataset.npz',
+    'methane_dataset.npz',
     noisy=noisy_array,
     clean=clean_array,
     params=params_array,
